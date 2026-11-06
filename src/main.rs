@@ -1,13 +1,16 @@
 //! OpenMixer: a Linux control panel for Audient iD audio interfaces.
 
+mod autostart;
 mod backend;
 mod config;
 mod daemon;
 mod device;
 mod linux_fixes;
 mod mixer;
+mod settings;
 mod tray;
 mod ui;
+mod updates;
 
 use std::thread;
 use std::time::Duration;
@@ -25,6 +28,9 @@ struct Cli {
     /// Show a preview of the mixer (iD14 MKII) while no interface is connected.
     #[arg(long)]
     preview: bool,
+    /// Start in the system tray without opening the window (used at login).
+    #[arg(long)]
+    hidden: bool,
     /// Internal: run only the mixer window (started by the tray process).
     #[arg(long, hide = true)]
     window: bool,
@@ -106,7 +112,7 @@ fn main() -> Result<()> {
                 ui::run(cli.preview, true);
                 Ok(())
             } else {
-                daemon::run(cli.preview)
+                daemon::run(cli.preview, cli.hidden)
             }
         }
     }

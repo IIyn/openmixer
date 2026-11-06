@@ -25,6 +25,17 @@ pub const UDEV_RULE: &str = include_str!("../packaging/70-openmixer-audient.rule
 
 pub const UDEV_INSTALL_COMMAND: &str = "sudo install -m644 packaging/70-openmixer-audient.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708";
 
+/// The udev rule is in place, installed by hand or by a package.
+pub fn udev_rule_installed() -> bool {
+    [
+        "/etc/udev/rules.d/70-openmixer-audient.rules",
+        "/usr/lib/udev/rules.d/70-openmixer-audient.rules",
+        "/lib/udev/rules.d/70-openmixer-audient.rules",
+    ]
+    .iter()
+    .any(|p| std::path::Path::new(p).exists())
+}
+
 fn wireplumber_path() -> Option<PathBuf> {
     Some(
         dirs::config_dir()?

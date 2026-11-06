@@ -76,28 +76,55 @@ impl Window {
     }
 }
 
-/// Forwards `show` requests from later launches to the tray loop.
+/// Forwards requests from later launches and from the window
+/// (`show`, `quit`, `restart`) to the tray loop.
 fn serve_socket(listener: UnixListener, actions: Sender<TrayAction>) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
             continue;
         };
         let mut line = String::new();
-        if BufReader::new(stream).read_line(&mut line).is_ok()
-            && line.trim() == "show"
-            && actions.send(TrayAction::Show).is_err()
-        {
+        if BufReader::new(stream).read_line(&mut line).is_err() {
+            continue;
+        }
+        let action = match line.trim() {
+            "show" => TrayAction::Show,
+            "quit" => TrayAction::Quit,
+            "restart" => TrayAction::Restart,
+            _ => continue,
+        };
+        if actions.send(action).is_err() {
             return;
         }
     }
 }
 
-/// Entry point of a normal launch.
-pub fn run(preview: bool) -> Result<()> {
+/// Sends a command to the running tray process. Fails when there is none
+/// (e.g. on a desktop without a tray).
+pub fn send(command: &str) -> Result<()> {
+    let mut stream =
+        UnixStream::connect(socket_path()).context("OpenMixer is not running in the tray")?;
+    writeln!(stream, "{command}").context("talking to the tray process")
+}
+
+/// What to launch to restart: the AppImage file itself when running from
+/// one (the binary inside lives on a temporary mount).
+fn restart_target() -> Result<PathBuf> {
+    match std::env::var_os("APPIMAGE") {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => std::env::current_exe().context("locating the openmixer binary"),
+    }
+}
+
+/// Entry point of a normal launch. With `hidden` (login autostart), only
+/// the tray icon appears until it is clicked.
+pub fn run(preview: bool, hidden: bool) -> Result<()> {
     let socket = socket_path();
-    // Already running: bring its window up and leave.
+    // Already running: bring its window up (unless started hidden) and leave.
     if let Ok(mut stream) = UnixStream::connect(&socket) {
-        writeln!(stream, "show").context("talking to the running OpenMixer")?;
+        if !hidden {
+            writeln!(stream, "show").context("talking to the running OpenMixer")?;
+        }
         return Ok(());
     }
     // A socket file nobody listens on is left over from a crash.
@@ -123,7 +150,15 @@ pub fn run(preview: bool) -> Result<()> {
         Err(e) => log::warn!("single-instance socket unavailable: {e}"),
     }
 
-    let mut window = Some(Window::spawn(preview)?);
+    // Resolved now: after an update the old binary is unlinked and
+    // /proc/self/exe would point to "(deleted)".
+    let restart_exe = restart_target()?;
+    let mut restart = false;
+    let mut window = if hidden {
+        None
+    } else {
+        Some(Window::spawn(preview)?)
+    };
     for action in rx {
         match action {
             TrayAction::Show => {
@@ -136,6 +171,10 @@ pub fn run(preview: bool) -> Result<()> {
                 }
             }
             TrayAction::Quit => break,
+            TrayAction::Restart => {
+                restart = true;
+                break;
+            }
         }
     }
     if let Some(w) = window {
@@ -143,6 +182,12 @@ pub fn run(preview: bool) -> Result<()> {
     }
     if let Err(e) = fs::remove_file(&socket) {
         log::debug!("removing {}: {e}", socket.display());
+    }
+    if restart {
+        // The socket is gone, so the new instance becomes the tray process.
+        Command::new(&restart_exe)
+            .spawn()
+            .with_context(|| format!("restarting {}", restart_exe.display()))?;
     }
     Ok(())
 }

@@ -42,6 +42,8 @@ fn decode_icon(bytes: &[u8]) -> Option<Icon> {
 pub enum TrayAction {
     Show,
     Quit,
+    /// Restart on the freshly installed version after an update.
+    Restart,
 }
 
 struct OpenMixerTray {

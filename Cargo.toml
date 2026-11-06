@@ -2,6 +2,12 @@
 name = "openmixer"
 version = "0.1.0"
 edition = "2024"
+description = "Mixer for Audient iD audio interfaces on Linux"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/IIyn/openmixer"
+readme = "README.md"
+keywords = ["audio", "audient", "mixer", "usb", "linux"]
+categories = ["multimedia::audio"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -14,6 +20,7 @@ ksni = { version = "0.3.7", default-features = false, features = ["blocking", "a
 log = "0.4.35"
 png = "0.18.1"
 rusb = "0.9.4"
+self_update = { version = "1.3.3", default-features = false, features = ["reqwest", "rustls", "github", "archive-tar", "compression-tar-gz"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.2.0"
@@ -25,3 +32,41 @@ unsafe_code = "forbid"
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+
+[package.metadata.deb]
+maintainer = "IIyn <https://github.com/IIyn>"
+copyright = "2026 IIyn"
+section = "sound"
+priority = "optional"
+depends = "$auto"
+extended-description = """\
+Control panel for Audient iD audio interfaces (iD14, iD14 MKII, iD24, iD44): \
+mixer, monitor section, output routing and meters. Installs the udev rule \
+that gives the logged-in user access to the interface."""
+maintainer-scripts = "packaging/debian/"
+assets = [
+    ["target/release/openmixer", "usr/bin/", "755"],
+    ["packaging/70-openmixer-audient.rules", "usr/lib/udev/rules.d/", "644"],
+    ["packaging/openmixer.desktop", "usr/share/applications/", "644"],
+    ["packaging/openmixer.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["packaging/icons/openmixer-48.png", "usr/share/icons/hicolor/48x48/apps/openmixer.png", "644"],
+    ["packaging/icons/openmixer-128.png", "usr/share/icons/hicolor/128x128/apps/openmixer.png", "644"],
+    ["packaging/icons/openmixer-256.png", "usr/share/icons/hicolor/256x256/apps/openmixer.png", "644"],
+    ["README.md", "usr/share/doc/openmixer/README.md", "644"],
+    ["LICENSE", "usr/share/doc/openmixer/LICENSE", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Mixer for Audient iD audio interfaces"
+post_install_script = "udevadm control --reload-rules >/dev/null 2>&1 || :; udevadm trigger --subsystem-match=usb --attr-match=idVendor=2708 >/dev/null 2>&1 || :"
+assets = [
+    { source = "target/release/openmixer", dest = "/usr/bin/openmixer", mode = "755" },
+    { source = "packaging/70-openmixer-audient.rules", dest = "/usr/lib/udev/rules.d/70-openmixer-audient.rules", mode = "644" },
+    { source = "packaging/openmixer.desktop", dest = "/usr/share/applications/openmixer.desktop", mode = "644" },
+    { source = "packaging/openmixer.svg", dest = "/usr/share/icons/hicolor/scalable/apps/openmixer.svg", mode = "644" },
+    { source = "packaging/icons/openmixer-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/openmixer.png", mode = "644" },
+    { source = "packaging/icons/openmixer-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/openmixer.png", mode = "644" },
+    { source = "packaging/icons/openmixer-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/openmixer.png", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/openmixer/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/openmixer/LICENSE", mode = "644" },
+]

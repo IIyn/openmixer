@@ -1,0 +1,8 @@
+#!/bin/sh
+# Apply the OpenMixer udev rule (USB access for the logged-in user) right away.
+set -e
+if [ "$1" = "configure" ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=usb --attr-match=idVendor=2708 || true
+fi
+#DEBHELPER#

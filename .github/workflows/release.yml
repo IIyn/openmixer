@@ -1,0 +1,130 @@
+# Builds OpenMixer and attaches installable packages to a GitHub release.
+#
+# Trigger: publish a release whose tag is the version, e.g. `v0.2.0`.
+# The crate version is taken from the tag, so the in-app updater compares
+# against the right number. Run it by hand on an existing tag through
+# "Run workflow" (workflow_dispatch).
+#
+# Assets:
+#   openmixer-<ver>-x86_64.AppImage                     any distribution
+#   openmixer_<ver>-1_amd64.deb                         Debian, Ubuntu, Mint, Pop!_OS…
+#   openmixer-<ver>-1.x86_64.rpm                        Fedora, openSUSE, RHEL…
+#   openmixer-<ver>-x86_64-unknown-linux-gnu.tar.gz     binary + udev rule + launcher (Arch, others)
+#   SHA256SUMS
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build (e.g. v0.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  package:
+    name: Build packages
+    # The oldest supported Ubuntu keeps the glibc requirement low, so the
+    # binaries run on older distributions too.
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Resolve tag and version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+
+      - name: Set the crate version from the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
+          grep -m1 '^version' Cargo.toml
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libusb-1.0-0-dev libudev-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev \
+            libwayland-dev libvulkan-dev libfontconfig1-dev libfreetype6-dev \
+            file desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Validate the launcher
+        run: desktop-file-validate packaging/openmixer.desktop
+
+      - name: Tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist staging
+          # The binary sits at the root of the archive for the in-app updater.
+          cp target/release/openmixer staging/
+          cp packaging/70-openmixer-audient.rules packaging/openmixer.desktop \
+             packaging/openmixer.svg packaging/install-desktop.sh README.md LICENSE staging/
+          tar -C staging -czf "dist/openmixer-$VERSION-$TARGET.tar.gz" .
+
+      - name: Debian package
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build --output dist/
+
+      - name: RPM package
+        run: |
+          cargo install cargo-generate-rpm --locked
+          cargo generate-rpm --output dist/
+
+      - name: AppImage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          # GitHub runners have no FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          cp packaging/icons/openmixer-256.png openmixer.png
+          LINUXDEPLOY_OUTPUT_VERSION="$VERSION" ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable target/release/openmixer \
+            --desktop-file packaging/openmixer.desktop \
+            --icon-file openmixer.png \
+            --output appimage
+          mv OpenMixer-*.AppImage "dist/openmixer-$VERSION-x86_64.AppImage"
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: dist/*
+          fail_on_unmatched_files: true

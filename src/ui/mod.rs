@@ -1,5 +1,6 @@
 //! Main window: channel strips per mix, monitor section, routing.
 
+mod settings_view;
 mod theme;
 mod widgets;
 
@@ -15,12 +16,16 @@ use gpui::{
     px,
 };
 
+use crate::autostart;
 use crate::backend::{Backend, Event};
 use crate::config;
 use crate::device::profile::NodeKind;
 use crate::device::{Profile, RouteSource, protocol};
 use crate::linux_fixes;
 use crate::mixer::{self, MixerState, Strip, UNITY};
+use crate::settings::{self, AppSettings};
+use crate::updates::{InstallKind, ReleaseInfo};
+use settings_view::{UpdateMsg, UpdateState};
 
 use theme::{FADER_H, MONITOR_H, PAN_W};
 use widgets::{button, fader, meter, pan, pan_label, section_title};
@@ -45,6 +50,12 @@ struct Drag {
     target: DragTarget,
     origin: Point<Pixels>,
     start: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Mixer,
+    Settings,
 }
 
 enum Status {
@@ -73,12 +84,22 @@ pub struct MixerApp {
     dirty_since: Option<Instant>,
     last_frame: Instant,
     soft_mixer: bool,
+    autostart: bool,
+    view: View,
+    /// Started by the tray process (closing the window keeps OpenMixer alive).
+    controlled: bool,
+    app_settings: AppSettings,
+    install_kind: InstallKind,
+    update_state: UpdateState,
+    update_rx: Option<Receiver<UpdateMsg>>,
+    releases: Vec<ReleaseInfo>,
+    confirm_reset: bool,
     message: Option<(String, bool)>,
     _quit_hook: gpui::Subscription,
 }
 
 impl MixerApp {
-    pub fn new(backend: Backend, cx: &mut Context<Self>) -> Self {
+    pub fn new(backend: Backend, controlled: bool, cx: &mut Context<Self>) -> Self {
         cx.spawn(async move |this, cx| {
             loop {
                 Timer::after(FRAME).await;
@@ -95,7 +116,7 @@ impl MixerApp {
             }
             async {}
         });
-        Self {
+        let mut app = Self {
             backend,
             status: Status::Searching,
             profile: None,
@@ -108,9 +129,22 @@ impl MixerApp {
             dirty_since: None,
             last_frame: Instant::now(),
             soft_mixer: linux_fixes::soft_mixer_installed(),
+            autostart: autostart::is_enabled(),
+            view: View::Mixer,
+            controlled,
+            app_settings: settings::load(),
+            install_kind: InstallKind::detect(),
+            update_state: UpdateState::Idle,
+            update_rx: None,
+            releases: Vec::new(),
+            confirm_reset: false,
             message: None,
             _quit_hook: quit_hook,
+        };
+        if app.app_settings.check_updates {
+            app.check_updates();
         }
+        app
     }
 
     // ---- device events -------------------------------------------------
@@ -119,6 +153,7 @@ impl MixerApp {
         while let Ok(event) = self.backend.events.try_recv() {
             self.handle(event);
         }
+        self.poll_updates();
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -398,6 +433,23 @@ impl MixerApp {
         });
     }
 
+    fn toggle_autostart(&mut self) {
+        let result = if self.autostart {
+            autostart::disable()
+        } else {
+            autostart::enable()
+        };
+        self.autostart = autostart::is_enabled();
+        self.message = Some(match result {
+            Ok(()) if self.autostart => (
+                "OpenMixer will start in the system tray at login.".into(),
+                false,
+            ),
+            Ok(()) => ("OpenMixer will no longer start at login.".into(), false),
+            Err(e) => (format!("{e:#}"), true),
+        });
+    }
+
     // ---- rendering -----------------------------------------------------
 
     fn render_header(&self, cx: &mut Context<Self>) -> Div {
@@ -458,7 +510,53 @@ impl MixerApp {
                             .child(status_text),
                     ),
             )
-            .child(div().flex().gap_1().children(tabs))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .when(self.view == View::Mixer, |d| {
+                        d.child(div().flex().gap_1().children(tabs))
+                    })
+                    .when_some(
+                        self.update_available().map(|r| r.version.clone()),
+                        |d, v| {
+                            d.child(
+                                button(format!("Update {v}"), true, theme::solo())
+                                    .h(px(28.0))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _: &MouseDownEvent, _, _| {
+                                            this.view = View::Settings
+                                        }),
+                                    ),
+                            )
+                        },
+                    )
+                    .child(
+                        button(
+                            if self.view == View::Settings {
+                                "← MIXER"
+                            } else {
+                                "SETTINGS"
+                            },
+                            false,
+                            theme::accent(),
+                        )
+                        .h(px(28.0))
+                        .px_3()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _: &MouseDownEvent, _, _| {
+                                this.confirm_reset = false;
+                                this.view = match this.view {
+                                    View::Mixer => View::Settings,
+                                    View::Settings => View::Mixer,
+                                };
+                            }),
+                        ),
+                    ),
+            )
     }
 
     fn render_banner(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -804,103 +902,81 @@ impl MixerApp {
         )
     }
 
-    fn render_footer(&self, cx: &mut Context<Self>) -> Div {
-        let show_digital = self.state.as_ref().is_some_and(|s| s.show_digital);
-        let mut footer = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_4()
-            .py_2()
-            .bg(theme::panel())
-            .border_t_1()
-            .border_color(theme::border())
-            .text_xs()
-            .child(
-                button("Digital inputs", show_digital, theme::accent()).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _, _| {
-                        if let Some(s) = &mut this.state {
-                            s.show_digital = !s.show_digital;
-                            this.mark_dirty();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                button(
-                    "L/R balance fix (software volume)",
-                    self.soft_mixer,
-                    theme::link(),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _, _| this.toggle_soft_mixer()),
-                ),
-            );
-        if let Some((msg, error)) = &self.message {
-            footer = footer.child(
-                div()
-                    .flex_1()
-                    .text_color(if *error { theme::mute() } else { theme::ok() })
-                    .child(msg.clone()),
-            );
-        }
-        footer
+    fn render_footer(&self) -> Option<Div> {
+        let (msg, error) = self.message.as_ref()?;
+        Some(
+            div()
+                .px_4()
+                .py_2()
+                .bg(theme::panel())
+                .border_t_1()
+                .border_color(theme::border())
+                .text_xs()
+                .text_color(if *error { theme::mute() } else { theme::ok() })
+                .child(msg.clone()),
+        )
     }
 }
 
 impl Render for MixerApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut body = div().flex().flex_1().gap_4().p_4().overflow_hidden();
-        match (self.profile, &self.state) {
-            (Some(profile), Some(state)) => {
-                let strips: Vec<AnyElement> = state
-                    .strips(profile)
-                    .into_iter()
-                    .map(|s| self.render_strip(profile, state, s, cx))
-                    .collect();
-                body = body
-                    .child(
-                        div()
-                            .id("strips")
-                            .flex()
-                            .flex_1()
-                            .gap_2()
-                            .overflow_x_scroll()
-                            .children(strips),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_4()
-                            .child(self.render_monitor(profile, state, cx))
-                            .children(self.render_routing(profile, state, cx)),
-                    );
-            }
-            _ => {
-                body = body
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_color(theme::text_dim())
-                            .child("Connect an Audient iD interface…"),
-                    )
-                    .child(
-                        button(
-                            "Preview without interface (iD14 MKII)",
-                            false,
-                            theme::accent(),
+        if self.view == View::Settings {
+            body = div()
+                .flex()
+                .flex_1()
+                .overflow_hidden()
+                .child(self.render_settings(cx));
+        } else {
+            match (self.profile, &self.state) {
+                (Some(profile), Some(state)) => {
+                    let strips: Vec<AnyElement> = state
+                        .strips(profile)
+                        .into_iter()
+                        .map(|s| self.render_strip(profile, state, s, cx))
+                        .collect();
+                    body = body
+                        .child(
+                            div()
+                                .id("strips")
+                                .flex()
+                                .flex_1()
+                                .gap_2()
+                                .overflow_x_scroll()
+                                .children(strips),
                         )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _: &MouseDownEvent, _, _| this.preview(0x0008)),
-                        ),
-                    );
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_4()
+                                .child(self.render_monitor(profile, state, cx))
+                                .children(self.render_routing(profile, state, cx)),
+                        );
+                }
+                _ => {
+                    body = body
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_color(theme::text_dim())
+                                .child("Connect an Audient iD interface…"),
+                        )
+                        .child(
+                            button(
+                                "Preview without interface (iD14 MKII)",
+                                false,
+                                theme::accent(),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseDownEvent, _, _| this.preview(0x0008)),
+                            ),
+                        );
+                }
             }
         }
         div()
@@ -918,7 +994,7 @@ impl Render for MixerApp {
             .child(self.render_header(cx))
             .children(self.render_banner(cx))
             .child(body)
-            .child(self.render_footer(cx))
+            .children(self.render_footer())
     }
 }
 
@@ -931,7 +1007,7 @@ impl Drop for MixerApp {
     }
 }
 
-fn open_main_window(preview: bool, cx: &mut App) {
+fn open_main_window(preview: bool, controlled: bool, cx: &mut App) {
     let backend = match Backend::spawn() {
         Ok(b) => b,
         Err(e) => {
@@ -952,7 +1028,7 @@ fn open_main_window(preview: bool, cx: &mut App) {
     };
     let opened = cx.open_window(options, |_, cx| {
         cx.new(|cx| {
-            let mut app = MixerApp::new(backend, cx);
+            let mut app = MixerApp::new(backend, controlled, cx);
             if preview {
                 app.preview(0x0008);
             }
@@ -972,7 +1048,7 @@ fn show_main_window(cx: &mut App) {
                 log::warn!("could not raise the window: {e:#}");
             }
         }
-        None => open_main_window(false, cx),
+        None => open_main_window(false, true, cx),
     }
     cx.activate(true);
 }
@@ -1022,8 +1098,15 @@ pub fn run(preview: bool, controlled: bool) {
         None
     };
     gpui::Application::new().run(move |cx: &mut App| {
-        cx.on_window_closed(|cx| {
+        cx.on_window_closed(move |cx| {
             if cx.windows().is_empty() {
+                // "Keep running in the tray" off: take the tray process down too.
+                if controlled
+                    && settings::load().quit_on_close
+                    && let Err(e) = crate::daemon::send("quit")
+                {
+                    log::warn!("{e:#}");
+                }
                 cx.quit();
             }
         })
@@ -1045,7 +1128,7 @@ pub fn run(preview: bool, controlled: bool) {
             })
             .detach();
         }
-        open_main_window(preview, cx);
+        open_main_window(preview, controlled, cx);
         cx.activate(true);
     });
 }
