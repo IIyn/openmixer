@@ -34,24 +34,89 @@ while the mixer runs.
 
 ## Installation
 
-Download the file for your distribution from the
-[latest release](https://github.com/IIyn/openmixer/releases/latest):
+Every [release](https://github.com/IIyn/openmixer/releases/latest) ships
+four formats. Pick the one for your distribution; `<ver>` is the version
+number (e.g. `0.2.0`).
 
-| Distribution | File | Install |
-|---|---|---|
-| Debian, Ubuntu, Mint, Pop!_OS… | `openmixer_<ver>-1_amd64.deb` | `sudo apt install ./openmixer_*.deb` |
-| Fedora, openSUSE, RHEL… | `openmixer-<ver>-1.x86_64.rpm` | `sudo dnf install ./openmixer-*.rpm` |
-| Any distribution | `openmixer-<ver>-x86_64.AppImage` | `chmod +x openmixer-*.AppImage` and run it |
-| Arch and others | `openmixer-<ver>-x86_64-unknown-linux-gnu.tar.gz` | extract, then `./install-desktop.sh ./openmixer` |
+| Distribution | File |
+|---|---|
+| Debian, Ubuntu, Linux Mint, Pop!_OS, elementary… | `openmixer_<ver>-1_amd64.deb` |
+| Fedora, openSUSE, RHEL, Nobara… | `openmixer-<ver>-1.x86_64.rpm` |
+| Any distribution, no install | `openmixer-<ver>-x86_64.AppImage` |
+| Arch, CachyOS, Manjaro, others | `openmixer-<ver>-x86_64-unknown-linux-gnu.tar.gz` |
 
-The .deb and .rpm packages install the udev rule for you. With the AppImage
-or the tarball, install it once (it gives the logged-in user USB access to
-the interface):
+Only x86_64 (64-bit Intel/AMD) builds are published for now.
+
+### Debian / Ubuntu (.deb)
 
 ```sh
-sudo install -m644 70-openmixer-audient.rules /etc/udev/rules.d/
-sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708
+sudo apt install ./openmixer_<ver>-1_amd64.deb
 ```
+
+That's all: the package installs the USB access rule, the launcher and the
+icon. Start **OpenMixer** from the application menu, then plug in (or
+replug) the interface. Update by installing the next .deb the same way.
+
+### Fedora / openSUSE (.rpm)
+
+```sh
+sudo dnf install ./openmixer-<ver>-1.x86_64.rpm      # Fedora, RHEL, Nobara
+sudo zypper install ./openmixer-<ver>-1.x86_64.rpm   # openSUSE
+```
+
+Same as the .deb: everything is set up, start it from the application menu.
+
+### AppImage (any distribution)
+
+1. Give USB access to your user, once ([why](#no-kernel-driver-needed)):
+
+   ```sh
+   echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2708", MODE="0660", GROUP="audio", TAG+="uaccess"' \
+     | sudo tee /etc/udev/rules.d/70-openmixer-audient.rules >/dev/null
+   sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708
+   ```
+
+2. Make the file executable and run it:
+
+   ```sh
+   chmod +x openmixer-<ver>-x86_64.AppImage
+   ./openmixer-<ver>-x86_64.AppImage
+   ```
+
+Keep the AppImage somewhere stable (e.g. `~/Applications/`): **Settings →
+Start at login** and the in-app updater use its location. Tools such as
+Gear Lever or AppImageLauncher can add it to the application menu.
+
+### Tarball (Arch, CachyOS and others)
+
+1. Extract it and install the binary and the launcher for your user:
+
+   ```sh
+   mkdir openmixer && tar -xzf openmixer-<ver>-x86_64-unknown-linux-gnu.tar.gz -C openmixer
+   cd openmixer
+   install -Dm755 openmixer ~/.local/bin/openmixer
+   ./install-desktop.sh ~/.local/bin/openmixer
+   ```
+
+   `~/.local/bin` must be in your `PATH` (it is on most distributions).
+
+2. Give USB access to your user, once:
+
+   ```sh
+   sudo install -m644 70-openmixer-audient.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708
+   ```
+
+Start **OpenMixer** from the application menu. It updates itself from
+**Settings → Updates**.
+
+### After installing
+
+- If OpenMixer says *USB access denied*, the udev rule is missing or the
+  interface was plugged in before it was installed: replug it.
+- On the first launch, OpenMixer writes a clean mix to the interface
+  (computer playback at 0 dB on both sides, inputs closed).
+- Enable **Settings → L/R balance fix** if one side is quieter or silent.
 
 ### From source
 

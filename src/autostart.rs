@@ -20,7 +20,12 @@ pub fn is_enabled() -> bool {
 /// Starts OpenMixer at login, in the tray only (`--hidden`).
 pub fn enable() -> Result<()> {
     let path = entry_path().context("config directory not found")?;
-    let exe = std::env::current_exe().context("locating the openmixer binary")?;
+    // From an AppImage, the binary lives on a temporary mount: start the
+    // AppImage file itself.
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => std::env::current_exe().context("locating the openmixer binary")?,
+    };
     let entry = format!(
         "[Desktop Entry]\n\
          Type=Application\n\

@@ -206,7 +206,8 @@ impl MixerApp {
                             linux_fixes::UDEV_INSTALL_COMMAND.to_owned(),
                         ));
                         this.message = Some((
-                            "Command copied: paste it in a terminal at the project root.".into(),
+                            "Command copied: paste it in a terminal (it asks for your password)."
+                                .into(),
                             false,
                         ));
                     }),

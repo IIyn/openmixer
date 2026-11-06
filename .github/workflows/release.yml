@@ -10,6 +10,7 @@
 #   openmixer_<ver>-1_amd64.deb                         Debian, Ubuntu, Mint, Pop!_OS…
 #   openmixer-<ver>-1.x86_64.rpm                        Fedora, openSUSE, RHEL…
 #   openmixer-<ver>-x86_64-unknown-linux-gnu.tar.gz     binary + udev rule + launcher (Arch, others)
+#   70-openmixer-audient.rules                         udev rule (for AppImage/tarball)
 #   SHA256SUMS
 
 name: Release
@@ -88,6 +89,8 @@ jobs:
           cp packaging/70-openmixer-audient.rules packaging/openmixer.desktop \
              packaging/openmixer.svg packaging/install-desktop.sh README.md LICENSE staging/
           tar -C staging -czf "dist/openmixer-$VERSION-$TARGET.tar.gz" .
+          # Also on its own, for AppImage users.
+          cp packaging/70-openmixer-audient.rules dist/
 
       - name: Debian package
         run: |

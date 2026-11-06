@@ -23,7 +23,9 @@ monitor.alsa.rules = [
 /// Gives the logged-in user access to the USB device (needed for control).
 pub const UDEV_RULE: &str = include_str!("../packaging/70-openmixer-audient.rules");
 
-pub const UDEV_INSTALL_COMMAND: &str = "sudo install -m644 packaging/70-openmixer-audient.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708";
+/// Self-contained: works from a release (AppImage, tarball) without the
+/// source tree. Must stay in sync with the rule file (checked by a test).
+pub const UDEV_INSTALL_COMMAND: &str = r#"echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2708", MODE="0660", GROUP="audio", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-openmixer-audient.rules >/dev/null && sudo udevadm control --reload && sudo udevadm trigger --attr-match=idVendor=2708"#;
 
 /// The udev rule is in place, installed by hand or by a package.
 pub fn udev_rule_installed() -> bool {
@@ -76,4 +78,19 @@ fn restart_wireplumber() -> Result<()> {
         bail!("systemctl --user restart wireplumber failed ({status})");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_command_matches_rule_file() {
+        let rule = UDEV_RULE
+            .lines()
+            .find(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .unwrap_or_default();
+        assert!(!rule.is_empty());
+        assert!(UDEV_INSTALL_COMMAND.contains(&format!("'{rule}'")));
+    }
 }
