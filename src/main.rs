@@ -2,6 +2,7 @@
 
 mod backend;
 mod config;
+mod daemon;
 mod device;
 mod linux_fixes;
 mod mixer;
@@ -24,6 +25,9 @@ struct Cli {
     /// Show a preview of the mixer (iD14 MKII) while no interface is connected.
     #[arg(long)]
     preview: bool,
+    /// Internal: run only the mixer window (started by the tray process).
+    #[arg(long, hide = true)]
+    window: bool,
 }
 
 #[derive(Subcommand)]
@@ -98,8 +102,12 @@ fn main() -> Result<()> {
             Ok(())
         }
         None => {
-            ui::run(cli.preview);
-            Ok(())
+            if cli.window {
+                ui::run(cli.preview, true);
+                Ok(())
+            } else {
+                daemon::run(cli.preview)
+            }
         }
     }
 }

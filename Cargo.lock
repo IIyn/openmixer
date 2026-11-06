@@ -3884,6 +3884,7 @@ dependencies = [
  "gpui",
  "ksni",
  "log",
+ "png 0.18.1",
  "rusb",
  "serde",
  "thiserror 2.0.21",

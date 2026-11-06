@@ -3,7 +3,11 @@
 mod theme;
 mod widgets;
 
+use std::io::{self, BufRead};
+use std::thread;
 use std::time::{Duration, Instant};
+
+use crossbeam_channel::{Receiver, unbounded};
 
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, FontWeight, MouseButton, MouseDownEvent,
@@ -17,13 +21,12 @@ use crate::device::profile::NodeKind;
 use crate::device::{Profile, RouteSource, protocol};
 use crate::linux_fixes;
 use crate::mixer::{self, MixerState, Strip, UNITY};
-use crate::tray::{self, TrayAction};
 
 use theme::{FADER_H, MONITOR_H, PAN_W};
 use widgets::{button, fader, meter, pan, pan_label, section_title};
 
 const FRAME: Duration = Duration::from_millis(33);
-const TRAY_POLL: Duration = Duration::from_millis(150);
+const CONTROL_POLL: Duration = Duration::from_millis(150);
 const SAVE_DELAY: Duration = Duration::from_secs(1);
 /// Ignore monitor read-back right after a local change, so the knob value
 /// in flight does not fight the user.
@@ -974,25 +977,65 @@ fn show_main_window(cx: &mut App) {
     cx.activate(true);
 }
 
-pub fn run(preview: bool) {
-    let tray = tray::spawn();
+/// Commands from the tray process, read from stdin.
+enum Control {
+    Show,
+    Quit,
+}
+
+/// Reads `show` lines from stdin; end of input means the tray process
+/// asked us to quit (or died).
+fn spawn_stdin_reader() -> Option<Receiver<Control>> {
+    let (tx, rx) = unbounded();
+    let spawned = thread::Builder::new()
+        .name("openmixer-stdin".into())
+        .spawn(move || {
+            for line in io::stdin().lock().lines() {
+                match line {
+                    Ok(l) if l.trim() == "show" => {
+                        if tx.send(Control::Show).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            // The UI may already be gone; nothing to do then.
+            tx.send(Control::Quit).ok();
+        });
+    match spawned {
+        Ok(_) => Some(rx),
+        Err(e) => {
+            log::warn!("could not read commands from stdin: {e}");
+            None
+        }
+    }
+}
+
+/// Runs the mixer window until it is closed. With `controlled`, the window
+/// also obeys `show` / end-of-input on stdin (sent by the tray process).
+pub fn run(preview: bool, controlled: bool) {
+    let control = if controlled {
+        spawn_stdin_reader()
+    } else {
+        None
+    };
     gpui::Application::new().run(move |cx: &mut App| {
-        let has_tray = tray.is_some();
-        // With a tray icon, closing the window only hides OpenMixer.
-        cx.on_window_closed(move |cx| {
-            if !has_tray && cx.windows().is_empty() {
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
                 cx.quit();
             }
         })
         .detach();
-        if let Some(tray) = tray {
+        if let Some(control) = control {
             cx.spawn(async move |cx| {
                 loop {
-                    Timer::after(TRAY_POLL).await;
-                    while let Ok(action) = tray.actions.try_recv() {
-                        let result = cx.update(|cx| match action {
-                            TrayAction::Show => show_main_window(cx),
-                            TrayAction::Quit => cx.quit(),
+                    Timer::after(CONTROL_POLL).await;
+                    while let Ok(cmd) = control.try_recv() {
+                        let result = cx.update(|cx| match cmd {
+                            Control::Show => show_main_window(cx),
+                            Control::Quit => cx.quit(),
                         });
                         if result.is_err() {
                             return;

@@ -47,8 +47,9 @@ packaging/install-desktop.sh
 
 Commands:
 
-- `openmixer`: graphical mixer. Closing the window keeps it running in the system tray;
-  left-click the tray icon to reopen it, or use its menu to quit
+- `openmixer`: graphical mixer. Closing the window keeps OpenMixer in the system tray;
+  left-click the tray icon to reopen it, or use its menu to quit. Launching it again
+  while it runs just shows the existing window
 - `openmixer --preview`: preview the mixer without an interface connected
 - `openmixer probe`: read-only. Prints the model, monitor volume and meters
 - `openmixer fix-balance [--remove]`: left/right balance fix (see below)
