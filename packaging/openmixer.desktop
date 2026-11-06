@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenMixer
+GenericName=Audio Interface Mixer
+Comment=Mixer for Audient iD audio interfaces
+Exec=openmixer
+Icon=openmixer
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=audient;id14;id44;mixer;audio;usb;
+StartupWMClass=openmixer

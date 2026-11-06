@@ -1,0 +1,3 @@
+# OpenMixer: let the logged-in user talk to Audient iD interfaces over USB.
+# The number must stay below 73 so that the uaccess tag is applied.
+SUBSYSTEM=="usb", ATTR{idVendor}=="2708", MODE="0660", GROUP="audio", TAG+="uaccess"

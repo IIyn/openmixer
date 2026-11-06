@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2f36"/>
+      <stop offset="1" stop-color="#121317"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f5f7"/>
+      <stop offset="1" stop-color="#b9bcc4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- console body -->
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#body)"/>
+  <rect x="13.5" y="13.5" width="229" height="229" rx="50.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+
+  <!-- fader slots -->
+  <g fill="#07080a">
+    <rect x="78"  y="56" width="10" height="144" rx="5"/>
+    <rect x="123" y="56" width="10" height="144" rx="5"/>
+    <rect x="168" y="56" width="10" height="144" rx="5"/>
+  </g>
+
+  <!-- active travel -->
+  <g fill="#3fa7d6">
+    <rect x="78"  y="150" width="10" height="50"  rx="5"/>
+    <rect x="123" y="98"  width="10" height="102" rx="5"/>
+    <rect x="168" y="128" width="10" height="72"  rx="5"/>
+  </g>
+
+  <!-- fader caps -->
+  <g fill="url(#cap)" stroke="#0b0c0e" stroke-opacity="0.5" stroke-width="2">
+    <rect x="64"  y="134" width="38" height="28" rx="6"/>
+    <rect x="109" y="82"  width="38" height="28" rx="6"/>
+    <rect x="154" y="112" width="38" height="28" rx="6"/>
+  </g>
+  <g fill="#16171b">
+    <rect x="70"  y="146" width="26" height="4" rx="2"/>
+    <rect x="115" y="94"  width="26" height="4" rx="2"/>
+    <rect x="160" y="124" width="26" height="4" rx="2"/>
+  </g>
+</svg>
